@@ -1,4 +1,5 @@
 #TODO: Add documentation
+# http://www.sfu.ca/~ssurjano/optimization.html
 
 import numpy as np
 
