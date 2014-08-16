@@ -1,1 +1,1 @@
-__author__ = 'al'
+from ga import GeneticAlgorithmOptimizer

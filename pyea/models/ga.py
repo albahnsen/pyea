@@ -1,235 +1,205 @@
-#TODO: Update with new format
-__author__ = 'Alejandro CORREA BAHNSEN'
-__version__ = '2.0-dev'
+"""
+This module include the Genetic Algorithms method. 
+"""
+
+# Authors: Alejandro Correa Bahnsen <al.bahnsen@gmail.com>
+# License: BSD 3 clause
 
 import numpy as np
+from numpy.core.defchararray import add
+import pandas as pd
+from scipy.stats import norm
 
 
-class GAbin:
-    # Same as in BA software
-    # Algorithm to evaluate a fitnessFuction using binary genetic algorithms
+class GeneticAlgorithmOptimizer:
+    """Genetic Algorithms method. 
+       Works with either binary or continuous functions
 
-    def __init__(self, K, fitnessFunction, iters, NC=10, MP=-1, CS=3, fargs=[]):
-        # K = Number of elements
-        #NC= Population size
-        #CS= Number of elite
-        #MP= Mutation probability
-        #Range = matrix of range of each element, first row low range and second row high range
-        #fitnessFunction = function to minimize, first parameter the vector of solution to evaluate,
-        #    after the parameters in the fargs list
+    Parameters
+    ----------
+    fitness_function : object
+        The function to measure the performance of each chromosome.
+        Must accept a vector of chromosomes and return a vector of cost.
+        By default it is assumed that it is a minimization problem.
+        
+    n_parameters : int
+        Number of parameters to estimate.
+    
+    iters : int, optional (default=10)
+        Number of iterations
+        
+    type : string, optional (default="cont")
+        Type of problem, either continuous or binary ("cont" or "binary")
 
-        """
+    n_chromosomes : int, optional (default=10)
+        Number of chromosomes.
+        
+    per_mutations : float, optional (default=0.2)
+        Percentage of mutations.
+            
+    n_elite : int, optional (default=2)
+        Number of elite chromosomes.
 
-        :param K:
-        :param fitnessFunction:
-        :param iters:
-        :param NC:
-        :param MP:
-        :param CS:
-        :param fargs:
-        """
-        self.K = int(K)
-        self.NC = int(NC)
+    fargs : tuple, optional (default=())
+        Additional parameters to be send to the fitness_function
 
-        if MP < 0:
-            self.MP = 1.0 / K
-        else:
-            self.MP = MP
+    range_ : tuple of floats, optional (default = (-1, 1))
+        Only for continuous problems. The range of the search space.
 
+    verbose : int, optional (default=0)
+        Controls the verbosity of the GA process.
+
+
+    Attributes
+    ----------
+    `hist_` : pandas.DataFrame of shape = [n_chromosomes * iters, columns=['iter', 'x0', 'x1', .., 'xk', 'cost', 'orig']]
+        History of the optimization process
+
+    References
+    ----------
+    .. [1] R. Haupt, S. Haupt, A.Correa, "Practical genetic algorithms (Second Edi.)",
+           New Jersey: John Wiley & Sons, Inc. (2004).
+
+    .. [2] S. Marslan, "Machine Learning: An Algorithmic Perspective",
+           New Jersey, USA: CRC Press. (2009).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pyea.models import GeneticAlgorithmOptimizer
+    >>> from pyea.functions import func_rosenbrock
+    >>> f = GeneticAlgorithmOptimizer(func_rosenbrock, n_parameters=2, iters=10, verbose=1)
+    >>> f.fit()
+    >>> # Best per iter
+    >>> f.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min)
+    """
+
+    def __init__(self,  
+                 fitness_function,
+                 n_parameters,
+                 iters=10, 
+                 type_='cont', 
+                 n_chromosomes=10, 
+                 per_mutations=0.2, 
+                 n_elite=2, 
+                 fargs=(),
+                 range_=(-1, 1),
+                 verbose=0):
+
+        self.n_parameters = n_parameters
+        self.n_chromosomes = n_chromosomes
+        self.per_mutations = per_mutations
         self.iters = iters
-        self.fitnessFunction = fitnessFunction
+        self.fitness_function = fitness_function
         self.fargs = fargs
+        self.n_elite = n_elite
+        self.type_ = type_
+        self.range_ = range_
+        self.verbose = verbose
 
-        self.CS = CS
-
-        #Initial random population
-        self.pop = np.random.binomial(1, 0.5, size=(self.NC, self.K))
+    def _random(self, n):
+        #TODO: Add random state
+        if self.type_ == 'binary':
+            temp_ = np.random.binomial(1, 0.5, size=(n, self.n_parameters)).astype(np.int)
+        else:
+            temp_ = (self.range_[1] - self.range_[0]) * np.random.rand(n, self.n_parameters) + self.range_[0]
+        return temp_
 
     def fit(self):
 
-        self.hist = np.zeros((self.iters, self.K + 1))
-        self.full_hist = np.zeros((self.iters * self.NC, self.K + 1))
+        # Results
+        _cols_x = ['x%d' % i for i in range(self.n_parameters)]
+        self.hist_ = pd.DataFrame(index=range((self.iters + 1) * self.n_chromosomes),
+                                  columns=['iter', ] + _cols_x + ['cost', 'orig', ])
+        self.hist_[['orig', ]] = '-1'
 
-        for i in range(self.iters):
-
-            # Evaluate fitness function
-            cost = self.fitnessFunction(self.pop, *self.fargs)
-
-            cost_sort = np.argsort(cost)
-
-            print i, 1 - cost[cost_sort[0]]
-
-            #Save best result
-            self.hist[i] = np.hstack((self.pop[cost_sort[0]], 1 - cost[cost_sort[0]]))
-
-            # Save all results
-            self.full_hist[i * self.NC:(i + 1) * self.NC] = np.hstack((self.pop, 1 - cost[:, np.newaxis]))
-
-            #Elitims
-            new_pop = self.pop[cost_sort[0:self.CS]]
-
-            #Select Parents
-            NumParents = self.NC - self.CS
-
-            #Cumulative probability of selection as parent
-            zcost = (cost - np.average(cost)) / np.std(cost)
-            from scipy.stats import norm
-
-            pzcost = 1 - norm.cdf(zcost)
-            pcost = np.cumsum(pzcost / sum(pzcost))
-
-            #Select parents & match
-            rand_parents = np.random.rand(NumParents, 2)
-            parents = np.zeros(rand_parents.shape, dtype=np.int)
-            for e1 in range(NumParents):
-                for e2 in range(2):
-                    if (np.nonzero(pcost < rand_parents[e1, e2])[0] + 1).sum() > 0:
-                        parents[e1, e2] = max(np.nonzero(pcost < rand_parents[e1, e2])[0]) + 1
-
-                #Continious
-                #rand_match=np.random.rand(self.K)
-                #child=self.pop[parents[e1,0]]*rand_match+(1-rand_match)*self.pop[parents[e1,1]]
-                #new_pop=np.vstack((new_pop,child))
-
-                #Binary
-                #random sigle point matching
-                rand_match = int(np.random.rand() * self.K)
-                child = np.hstack((self.pop[parents[e1, 0], 0:rand_match], self.pop[parents[e1, 1], rand_match:]))
-                new_pop = np.vstack((new_pop, child))
-
-            #Mutate
-            num_mutations = int(round(self.K * NumParents * self.MP, 0))
-            l_mutations = np.array([np.random.random_integers(NumParents, size=num_mutations) + self.CS - 1,
-                                    np.random.random_integers(self.K, size=num_mutations) - 1])
-
-            for e3 in range(int(num_mutations)):
-                new_pop[l_mutations[0, e3], l_mutations[1, e3]] = (new_pop[
-                                                                       l_mutations[0, e3], l_mutations[1, e3]] - 1) ** 2
-
-            # replace replicates with random
-            for e1 in range(new_pop.shape[0] - 1):
-                for e2 in range(e1 + 1, new_pop.shape[0]):
-                    if np.array_equal(new_pop[e1], new_pop[e2]):
-                        new_pop[e2] = np.random.binomial(1, np.random.rand(1)[0] * 0.4 + 0.3, size=(new_pop.shape[1]))
-
-            self.pop = new_pop
-
-        self.x = self.hist[-1, :-1]
-        self.best_cost = self.hist[-1, -1]
-
-
-# Implementation based on \cite{Haupt2004} Haupt, R., & Haupt, S. (2004). Practical genetic algorithms (Second Edi.). New Jersey: John Wiley & Sons, Inc. Retrieved from http://books.google.com/books?hl=en&lr=&id=k0jFfsmbtZIC&oi=fnd&pg=PR11&dq=PRACTICAL+GENETIC+ALGORITHMS&ots=PP5QNHJEr9&sig=PHA7Z1cFCKoQLJLPcg_RBoSWEbA
-#Initial parameters base on \cite{Marslan} Marslan, S. (2009). Machine Learning: An Algorithmic Perspective. New Jersey, USA: CRC Press. Retrieved from http://www-ist.massey.ac.nz/smarsland/MLbook.html
-
-import numpy as np, datetime as dt
-
-# TODO: Create only one GA function for both binary and continious cases
-
-class GAcont:
-    # Same as Cetrel
-    def __init__(self, K, fitnessFunction, iters, NC=100, MP=-1, CS=10, range=None, print_iter=True, fargs=[]):
-        #K = Number of elements
-        #NC= Population size
-        #CS= Number of elite
-        #MP= Mutation probability
-        #Range = matrix of range of each element, first row low range and second row high range
-        #fitnessFunction = function to minimize, first parameter the vector of solution to evaluate,
-        #    after the parameters in the fargs list
-
-        self.K = K
-        self.NC = NC
-        self.print_iter = print_iter
-
-        if MP < 0:
-            self.MP = 1.0 / K
-        else:
-            self.MP = MP
-
-        self.iters = iters
-        self.fitnessFunction = fitnessFunction
-        self.fargs = fargs
-
-        self.CS = CS
-        if range == None:
-            #Range (-1,1)
-            self.range1 = np.vstack(((-1) * np.ones((1, K)), np.ones((1, K))))
-        else:
-            self.range1 = range
         #Initial random population
-        self.pop = (self.range1[1,] - self.range1[0,]) * np.random.rand(NC, self.K) + self.range1[0,]
+        self.pop_ = self._random(self.n_chromosomes)
+        self.cost_ = self.fitness_function(self.pop_, *self.fargs)
 
-
-    def evaluate(self):
-        t0 = dt.datetime.now()
-        self.hist = np.zeros((self.iters, self.K + 1))
-        self.full_hist = np.zeros((self.iters * self.NC, self.K + 1))
+        filter_iter = range(0, self.n_chromosomes)
+        self.hist_.loc[filter_iter, 'iter'] = 0
+        self.hist_.loc[filter_iter, 'cost'] = self.cost_
+        self.hist_.loc[filter_iter, _cols_x] = self.pop_
 
         for i in range(self.iters):
 
-            #Evaluate fitness function
-            cost = self.fitnessFunction(self.pop, *self.fargs)
+            if self.verbose > 0:
+                print 'Iteration ' + str(i) + ' of ' + str(self.iters)
 
-            cost_sort = np.argsort(cost)
-
-            #Save best result
-            self.hist[i] = np.hstack((self.pop[cost_sort[0]], cost[cost_sort[0]]))
-
-            # Save all results
-            self.full_hist[i * self.NC:(i + 1) * self.NC] = np.hstack((self.pop, cost[:, np.newaxis]))
-
-            if self.print_iter:
-                print "GA iter " + str(i) + " of " + str(self.iters) + " - secs " + str(
-                    (dt.datetime.now() - t0).seconds) + ' - best = ' + str(min(cost))
+            orig = np.empty(self.n_chromosomes, dtype='S10')
+            cost_sort = np.argsort(self.cost_)
 
             #Elitims
-            new_pop = self.pop[cost_sort[0:self.CS]]
-
-            #Select Parents
-            NumParents = int(self.NC - self.CS)
+            new_pop = np.empty_like(self.pop_)
+            new_pop[0:self.n_elite] = self.pop_[cost_sort[0:self.n_elite]]
+            orig[0:self.n_elite] = (cost_sort[0:self.n_elite] + i * self.n_chromosomes).astype(np.str)
 
             #Cumulative probability of selection as parent
-            zcost = (cost - np.average(cost)) / np.std(cost)
-            from scipy.stats import norm
-
+            zcost = (self.cost_ - np.average(self.cost_)) / np.std(self.cost_)
             pzcost = 1 - norm.cdf(zcost)
             pcost = np.cumsum(pzcost / sum(pzcost))
 
             #Select parents & match
-            rand_parents = np.random.rand(NumParents, 2)
+            numparents = self.n_chromosomes - self.n_elite
+            #TODO: Add random state
+            rand_parents = np.random.rand(numparents, 2)
             parents = np.zeros(rand_parents.shape, dtype=np.int)
-            for e1 in range(NumParents):
-                for e2 in range(2):
-                    if (np.nonzero(pcost < rand_parents[e1, e2])[0] + 1).sum() > 0:
-                        parents[e1, e2] = max(np.nonzero(pcost < rand_parents[e1, e2])[0]) + 1
+            for parent1 in range(numparents):
+                for parent2 in range(2):
+                    parents[parent1, parent2] = np.searchsorted(pcost, rand_parents[parent1, parent2])
 
-                rand_match = np.random.rand(self.K)
-                child = self.pop[parents[e1, 0]] * rand_match + (1 - rand_match) * self.pop[parents[e1, 1]]
-                new_pop = np.vstack((new_pop, child))
+                if self.type_ == 'binary':
+                    #Binary
+                    #random single point matching
+                    rand_match = int(np.random.rand() * self.n_parameters)
+                    child = self.pop_[parents[parent1, 0]]
+                    child[rand_match:] = self.pop_[parents[parent1, 1]]
+                else:
+                    #Continious
+                    rand_match = np.random.rand(self.n_parameters)
+                    child = self.pop_[parents[parent1, 0]] * rand_match
+                    child += (1 - rand_match) * self.pop_[parents[parent1, 1]]
+
+                new_pop[self.n_elite + parent1] = child
+
+            orig[self.n_elite:] = [','.join(row.astype(np.str)) for row in (parents + i * self.n_chromosomes)]
 
             #Mutate
-            num_mutations = int(round(self.K * NumParents * self.MP, 0))
-            l_mutations = np.array([np.random.random_integers(NumParents, size=num_mutations) + self.CS - 1,
-                                    np.random.random_integers(self.K, size=num_mutations) - 1])
+            m_rand = np.random.rand(self.n_chromosomes, self.n_parameters)
+            m_rand[0:self.n_elite] = 1.0
+            mutations = m_rand <= self.per_mutations
+            num_mutations = np.count_nonzero(mutations)
 
-            for e3 in range(int(num_mutations)):
-                new_pop[l_mutations[0, e3], l_mutations[1, e3]] = (self.range1[1, l_mutations[1, e3]] - self.range1[
-                    0, l_mutations[1, e3]]) * np.random.rand() + self.range1[0, l_mutations[1, e3]]
+            if self.type_ == 'binary':
+                new_pop[mutations] = int(new_pop[mutations] == 0)
+            else:
+                new_pop[mutations] = self._random(num_mutations)[:, 0]
 
-            self.pop = new_pop
+            rows_mutations = np.any(mutations, axis=1)
+            orig[rows_mutations] = add(orig[rows_mutations], ['_M'] * np.count_nonzero(rows_mutations))
 
-        self.x = self.hist[-1, :-1]
-        self.best_cost = self.hist[-1, -1]
+            # Replace replicates with random
+            temp_unique = np.ascontiguousarray(new_pop).view(np.dtype((np.void,
+                                                                       new_pop.dtype.itemsize * new_pop.shape[1])))
+            _, temp_unique_idx = np.unique(temp_unique, return_index=True)
+            n_replace = self.n_chromosomes - temp_unique_idx.shape[0]
+            if n_replace > 0:
+                temp_unique_replace = np.ones(self.n_chromosomes, dtype=np.bool)
+                temp_unique_replace[:] = True
+                temp_unique_replace[temp_unique_idx] = False
+                new_pop[temp_unique_replace] = self._random(n_replace)
+                orig[temp_unique_replace] = '-1'
 
-        ##Test using Haupt Book example
-        #def cost(pop,a,b,c):
-        #    return pop[:,0]*np.sin(4*pop[:,0])+1.1*pop[:,1]*np.sin(2*pop[:,1])+a+b+c.sum()
-        #
-        #ga=None
-        #c=np.array([[10,10],[10,10]])
-        #ga=ga_cont(2,cost,10,100,CS=5,MP=0.3,range=np.vstack((0*np.ones((1,2)),10*np.ones((1,2)))),fargs=[0,0,c])
-        #ga.evaluate()
-        ##import matplotlib.pyplot as plt
-        ##plt.plot(ga.hist[:,2])
-        ##plt.show()
-        #print ga.x
-        #print ga.best_cost
+            self.pop_ = new_pop
+            self.cost_ = self.fitness_function(self.pop_, *self.fargs)
+
+            filter_iter = range((i + 1) * self.n_chromosomes, (i + 2) * self.n_chromosomes)
+            self.hist_.loc[filter_iter, 'iter'] = i + 1
+            self.hist_.loc[filter_iter, 'cost'] = self.cost_
+            self.hist_.loc[filter_iter, _cols_x] = self.pop_
+            self.hist_.loc[filter_iter, 'orig'] = orig
+
+        best = np.argmin(self.cost_)
+        self.x = self.pop_[best]
+        self.x_cost = self.cost_[best]
