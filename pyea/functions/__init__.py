@@ -4,6 +4,23 @@
 import numpy as np
 
 
+def _decode_bin(x, format='1514'):
+    decode = np.zeros(x.shape[0])
+    for i, ix in enumerate(x):
+        int_ = int(''.join(ix[1:6].astype(np.str)), 2) * ((-1) ** ix[0])
+        dec_ = int(''.join(ix[6:].astype(np.str)), 2)
+        max_int = int(''.join(np.ones(14, dtype=np.str)), 2)
+        decode[i] = int_ + dec_ * 1.0 / max_int
+    return decode
+
+
+def func_rosenbrock_bin(pop, a=1, b=100):
+    new_pop = np.zeros((pop.shape[0], 2))
+    new_pop[:, 0] = _decode_bin(pop[:, 0:20])
+    new_pop[:, 1] = _decode_bin(pop[:, 20:])
+    return func_rosenbrock(new_pop, a=a, b=b)
+
+
 def func_rosenbrock(pop, a=1, b=100):
     # http://en.wikipedia.org/wiki/Rosenbrock_function
     x = pop[:, 0]

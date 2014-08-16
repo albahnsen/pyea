@@ -9,6 +9,30 @@ import numpy as np
 from numpy.core.defchararray import add
 import pandas as pd
 from scipy.stats import norm
+from sklearn.externals.joblib import Parallel, delayed, cpu_count
+import itertools
+
+# Is different in 0.15, copy version from 0.16-git
+def _partition_estimators(n_estimators, n_jobs):
+    """Private function used to partition estimators between jobs."""
+    # Compute the number of jobs
+    if n_jobs == -1:
+        n_jobs = min(cpu_count(), n_estimators)
+
+    else:
+        n_jobs = min(n_jobs, n_estimators)
+
+    # Partition estimators between jobs
+    n_estimators_per_job = (n_estimators // n_jobs) * np.ones(n_jobs,
+                                                              dtype=np.int)
+    n_estimators_per_job[:n_estimators % n_jobs] += 1
+    starts = np.cumsum(n_estimators_per_job)
+
+    return n_jobs, n_estimators_per_job.tolist(), [0] + starts.tolist()
+
+
+def _fitness_function_parallel(pop, fitness_function, fargs):
+    return fitness_function(pop, *fargs).tolist()
 
 
 class GeneticAlgorithmOptimizer:
@@ -46,6 +70,10 @@ class GeneticAlgorithmOptimizer:
     range_ : tuple of floats, optional (default = (-1, 1))
         Only for continuous problems. The range of the search space.
 
+    n_jobs : integer, optional (default=1)
+        The number of jobs to run in parallel for 'fit`.
+        If -1, then the number of jobs is set to the number of cores.
+
     verbose : int, optional (default=0)
         Controls the verbosity of the GA process.
 
@@ -67,11 +95,14 @@ class GeneticAlgorithmOptimizer:
     --------
     >>> import numpy as np
     >>> from pyea.models import GeneticAlgorithmOptimizer
-    >>> from pyea.functions import func_rosenbrock
-    >>> f = GeneticAlgorithmOptimizer(func_rosenbrock, n_parameters=2, iters=10, verbose=1)
-    >>> f.fit()
+    >>> from pyea.functions import func_rosenbrock, func_rosenbrock_bin
+    >>> f1 = GeneticAlgorithmOptimizer(func_rosenbrock, n_parameters=2, iters=10, type_='cont', range_=(-31, 31))
+    >>> f2 = GeneticAlgorithmOptimizer(func_rosenbrock_bin, n_parameters=40, iters=10, type_='binary')
+    >>> f1.fit()
+    >>> f2.fit()
     >>> # Best per iter
-    >>> f.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min)
+    >>> print f1.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min)
+    >>> print f2.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min)
     """
 
     def __init__(self,  
@@ -84,6 +115,7 @@ class GeneticAlgorithmOptimizer:
                  n_elite=2, 
                  fargs=(),
                  range_=(-1, 1),
+                 n_jobs=1,
                  verbose=0):
 
         self.n_parameters = n_parameters
@@ -95,6 +127,7 @@ class GeneticAlgorithmOptimizer:
         self.n_elite = n_elite
         self.type_ = type_
         self.range_ = range_
+        self.n_jobs = n_jobs
         self.verbose = verbose
 
     def _random(self, n):
@@ -104,6 +137,20 @@ class GeneticAlgorithmOptimizer:
         else:
             temp_ = (self.range_[1] - self.range_[0]) * np.random.rand(n, self.n_parameters) + self.range_[0]
         return temp_
+
+    def _fitness_function(self):
+
+        # Parallel loop
+        n_jobs, _, starts = _partition_estimators(self.n_chromosomes, self.n_jobs)
+
+        all_results = Parallel(n_jobs=n_jobs, verbose=self.verbose, backend='multiprocessing')(
+            delayed(_fitness_function_parallel)(
+                self.pop_[starts[i]:starts[i + 1]],
+                self.fitness_function,
+                self.fargs)
+            for i in range(n_jobs))
+
+        return np.array(list(itertools.chain.from_iterable(t for t in all_results)))
 
     def fit(self):
 
@@ -115,7 +162,7 @@ class GeneticAlgorithmOptimizer:
 
         #Initial random population
         self.pop_ = self._random(self.n_chromosomes)
-        self.cost_ = self.fitness_function(self.pop_, *self.fargs)
+        self.cost_ = self._fitness_function()
 
         filter_iter = range(0, self.n_chromosomes)
         self.hist_.loc[filter_iter, 'iter'] = 0
@@ -154,7 +201,7 @@ class GeneticAlgorithmOptimizer:
                     #random single point matching
                     rand_match = int(np.random.rand() * self.n_parameters)
                     child = self.pop_[parents[parent1, 0]]
-                    child[rand_match:] = self.pop_[parents[parent1, 1]]
+                    child[rand_match:] = self.pop_[parents[parent1, 1], rand_match:]
                 else:
                     #Continious
                     rand_match = np.random.rand(self.n_parameters)
@@ -172,7 +219,7 @@ class GeneticAlgorithmOptimizer:
             num_mutations = np.count_nonzero(mutations)
 
             if self.type_ == 'binary':
-                new_pop[mutations] = int(new_pop[mutations] == 0)
+                new_pop[mutations] = (new_pop[mutations] == 0).astype(np.int)
             else:
                 new_pop[mutations] = self._random(num_mutations)[:, 0]
 
@@ -192,7 +239,7 @@ class GeneticAlgorithmOptimizer:
                 orig[temp_unique_replace] = '-1'
 
             self.pop_ = new_pop
-            self.cost_ = self.fitness_function(self.pop_, *self.fargs)
+            self.cost_ = self._fitness_function()
 
             filter_iter = range((i + 1) * self.n_chromosomes, (i + 2) * self.n_chromosomes)
             self.hist_.loc[filter_iter, 'iter'] = i + 1
