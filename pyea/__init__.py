@@ -7,7 +7,7 @@ pyea is a set of pure python libraries including the most common evolutionary al
 # Authors: Alejandro Correa Bahnsen <al.bahnsen@gmail.com>
 # License: BSD 3 clause
 
-__version__ = '0.2-git'
+__version__ = '0.2'
 
 
-from models import *
+from .models import *

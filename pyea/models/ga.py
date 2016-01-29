@@ -101,8 +101,8 @@ class GeneticAlgorithmOptimizer:
     >>> f1.fit()
     >>> f2.fit()
     >>> # Best per iter
-    >>> print f1.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min)
-    >>> print f2.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min)
+    >>> print(f1.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min))
+    >>> print(f2.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min))
     """
 
     def __init__(self,  
@@ -172,7 +172,7 @@ class GeneticAlgorithmOptimizer:
         for i in range(self.iters):
 
             if self.verbose > 0:
-                print 'Iteration ' + str(i) + ' of ' + str(self.iters)
+                print('Iteration ' + str(i) + ' of ' + str(self.iters))
 
             orig = np.empty(self.n_chromosomes, dtype='S10')
             cost_sort = np.argsort(self.cost_)
@@ -224,7 +224,8 @@ class GeneticAlgorithmOptimizer:
                 new_pop[mutations] = self._random(num_mutations)[:, 0]
 
             rows_mutations = np.any(mutations, axis=1)
-            orig[rows_mutations] = add(orig[rows_mutations], ['_M'] * np.count_nonzero(rows_mutations))
+            orig[rows_mutations] = add(orig[rows_mutations],
+                                       np.array(['_M'] * np.count_nonzero(rows_mutations), dtype='S10'))
 
             # Replace replicates with random
             temp_unique = np.ascontiguousarray(new_pop).view(np.dtype((np.void,
@@ -250,3 +251,15 @@ class GeneticAlgorithmOptimizer:
         best = np.argmin(self.cost_)
         self.x = self.pop_[best]
         self.x_cost = self.cost_[best]
+
+if __name__ == "__main__":
+    import numpy as np
+    from pyea.models import GeneticAlgorithmOptimizer
+    from pyea.functions import func_rosenbrock, func_rosenbrock_bin
+    f1 = GeneticAlgorithmOptimizer(func_rosenbrock, n_parameters=2, iters=10, type_='cont', range_=(-31, 31))
+    f2 = GeneticAlgorithmOptimizer(func_rosenbrock_bin, n_parameters=40, iters=10, type_='binary')
+    f1.fit()
+    f2.fit()
+    # Best per iter
+    print(f1.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min))
+    print(f2.hist_[['iter', 'cost']].groupby('iter').aggregate(np.min))
