@@ -9,7 +9,7 @@ import numpy as np
 from numpy.core.defchararray import add
 import pandas as pd
 from scipy.stats import norm
-from sklearn.externals.joblib import Parallel, delayed, cpu_count
+from joblib import Parallel, delayed, cpu_count
 import itertools
 
 # Is different in 0.15, copy version from 0.16-git
